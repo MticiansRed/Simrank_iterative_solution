@@ -5,6 +5,7 @@ import sys
 import time
 from memory_profiler import profile
 
+#---Fixed Point---
 def SimpleIterIP(k_max, A, c, tau, N, eps = 1e-13):# OUTDATED/rework to call in GMRES_m similar manner.
 	I = np.identity(N)
 	A = csr_matrix(A)
@@ -35,8 +36,23 @@ def SimpleIterIP(k_max, A, c, tau, N, eps = 1e-13):# OUTDATED/rework to call in 
 	plt.ylabel(r'$Local\quadresiduals$', fontsize = 12)
 	
 	return S
+#---
 
-#---main version---
+#---MGS debug---
+def MGSError(V):
+	M = V.T@V
+	n = M.shape[0]
+	print(f"|| I - V.T@V ||_F = {np.linalg.norm((np.identity(n)-M), ord = 'fro')}")
+	return
+def SeeNNZ(V):
+	M = V.T@V
+	for i in range(M.shape[0]):
+		for j in range(M.shape[1]):
+			if (M[i,j]!=0):
+				print(f"Nonzero({i},{j}) = {M[i,j]}")
+	return
+#---
+#---GMRES(m)---
 def LSq(beta, H):
 	m = H.shape[1]
 	e1 = np.zeros((m+1,1))
@@ -45,9 +61,9 @@ def LSq(beta, H):
 	y = np.linalg.inv(H.T@H)@H.T@b
 	return y
 
-def Arnoldi(V_list, h_list, m_start, m, LinOp):
-	for j in range(m_start, m):
-		print(f"Building Arnoldi: V[:,{j}]", end = '\r')
+def Arnoldi(V_list, h_list, m_start, m_Krylov, LinOp, eps_GS = 1e-10):
+	for j in range(m_start, m_Krylov):
+		#print(f"Building Arnoldi: V[:,{j}]", end = '\r')
 		v_j = V_list[j]
 		w_j = colvecto1dim(LinOp(v_j))
 		for i in range(j):
@@ -56,10 +72,10 @@ def Arnoldi(V_list, h_list, m_start, m, LinOp):
 			w_j = w_j - h_list[i][j]*v_i
 		w_j_norm2 = np.linalg.norm(w_j, ord = 2)
 		h_list[j+1][j] = w_j_norm2
-		if (w_j_norm2 == 0):
+		if (w_j_norm2 <= eps_GS):
 			return j
 		V_list[j+1] = (w_j/w_j_norm2)
-	return m
+	return m_Krylov
 
 def colvecto1dim(u):
 	return u.reshape(u.shape[0], order = 'F')
@@ -97,6 +113,10 @@ def GMRES_m(LinOp, m_Krylov, x_0, b, k_max, eps = 1e-13):
 			st_iter = time.time()
 			m = Arnoldi(V_list, H_list, (m-1), m,  LinOp)
 			V = (np.array(V_list[:m])).T #Slicing V_list[:m] because v_{m+1} is not needed for projection step.
+			###
+			MGSError(V)
+			SeeNNZ(V)
+			###
 			H = (np.array(H_list)).T[:m].T #Slicing because everything right to m'th column is placeholding zeros.
 			y = LSq(beta, H)
 			x = x_0 + V@y
@@ -127,6 +147,7 @@ def GMRES_m(LinOp, m_Krylov, x_0, b, k_max, eps = 1e-13):
 	#
 	return x
 
+#---MinRes---
 def MinRes(k_max, A, c, N, eps = 1e-13): # OUTDATED/rework to call in GMRES_m similar manner.
 	I = np.identity(N)
 	I_vec = I.reshape((N**2, 1), order = 'F')
@@ -168,3 +189,4 @@ def MinRes(k_max, A, c, N, eps = 1e-13): # OUTDATED/rework to call in GMRES_m si
 	plt.ylabel(r'$Local\quadresiduals$', fontsize = 12)
 	S = s.reshape((N,N), order = 'F')
 	return S
+#---
