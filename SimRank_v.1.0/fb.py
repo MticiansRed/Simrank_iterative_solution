@@ -13,9 +13,24 @@ from memory_profiler import profile
 import dlyap
 import dlyap_fast
 
+class G_operator:
+	def __init__(self, A, c):
+		self.A = A
+		self.n = self.A.shape[1]
+		if (self.n!=self.A.shape[0]):
+			print(f"Warning! Non-zero adjacency matrix detected when constructing operator.")
+		self.c = c
+	def __call__(self, u):
+		self.A = csr_matrix(self.A)
+		U = u.reshape((self.n, self.n), order = 'F')
+		ATUA = self.A.T@U@self.A
+		G = U - self.c*ATUA+self.c*np.diag(np.diag(ATUA))
+		G = G.reshape((self.n**2,1), order = 'F')
+		return G
+
 #WARNING: GetMatrix only for non-directed graphs.
-def GetMatrix(N, path = "/home/egor-berezin/mticiansred_library/Uni_MGU-Sarov/Disser_mag/programs/SimRank_mainbranch/SNAP_datasets/facebook_combined.txt", delimeter = ' '):
-	A = np.zeros((N,N))
+def GetMatrix(n, path = "/home/egor-berezin/mticiansred_library/Uni_MGU-Sarov/Disser_mag/programs/SimRank_mainbranch/SNAP_datasets/facebook_combined.txt", delimeter = ' '):
+	A = np.zeros((n,n))
 	file = open(path,'r')
 	for line in file:
 		string = file.readline().split(delimeter)
@@ -34,22 +49,26 @@ def norm1_ColumnNormalize(M): #may be optimized! L1 col norms can be easily obta
 	print("Column 1-normalized matrix:")
 	print (normalized)
 	return normalized
-@profile
+
 def Facebook(acc, m_Krylov):
-	N = 4039
-	A = GetMatrix(N)
-	I = np.identity(N) #identity matrix of required dimensions
+	n = 4039
+	A = GetMatrix(n)
+	I = np.identity(n) #identity matrix of required dimensions
 	print("Adjacency matrix:")
 	print(A)
 	c = 0.8
-	A_n1c = norm1_ColumnNormalize(A) 
-	I = np.identity(N)
-	print("Similarity matrix:")
+	A_n1c = norm1_ColumnNormalize(A)
+	I = np.identity(n)
+	print("Initializing GMRES...")
 	k_iter = 1000000
-	print(f"{k_iter} iterations")
-	print("Starting GMRES...")
+	I_vec = np.identity(n).reshape((n**2,1), order = 'F')
 	A_n1c_csr = csr_matrix(A_n1c)
-	S_end = dlyap.GMRES_m(k_iter, m_Krylov, A_n1c_csr, c, N, acc)
+	G = G_operator(A_n1c, c) 
+
+	print(f"Starting GMRES with {k_iter} iterations limit and {m_Krylov} max Krylov subspace dimensionality ..")
+	
+	S_end = dlyap.GMRES_m(G, m_Krylov, I_vec, I_vec, k_iter, acc).reshape((n,n), order = 'F') #reshape vec to mat
+	
 	#print("Starting MinRes...")
 	#dlyap.MinRes(k_iter, A_n1c_csr, c, N, acc)
 	#print("Starting Simple Iter...")
@@ -70,20 +89,11 @@ def Facebook(acc, m_Krylov):
 	cbar.set_label("ln(S[i,j])")
 	#plt.title("Facebook")
 	plt.title("Матрица S", fontweight = "bold")
-	'''
-	topn = 3
-	for count in range(topn): #top n
-		S_end_triu = np.triu(S_end)
-		smax = np.argmax(S_end_triu-I, axis=None)
-		indmax = np.unravel_index(smax, (S_end-I).shape)
-		print("Maximum SimScore: ", S_end[indmax])
-		print("Maximum SimScore index: ", indmax)
-		S_end[indmax] = 0
-		'''
+
 
 def showmatrix():
-	N = 4039
-	A = GetMatrix(N)
+	n = 4039
+	A = GetMatrix(n)
 	plt.figure()
 	graph = plt.imshow(A+1e-15)
 	return 0
