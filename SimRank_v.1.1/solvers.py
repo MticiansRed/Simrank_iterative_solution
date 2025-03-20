@@ -6,38 +6,42 @@ import sys
 import time
 from memory_profiler import profile
 
+
+class iterations_data:
+	def __init__(self):
+		self.iterations = []
+		self.residuals = []
+		self.k_iter = 0
+	def __call__(self, r):
+		self.k_iter+=1
+		self.iterations.append(self.k_iter)
+		self.residuals.append(r)
+		print(f"Iteration: {self.k_iter}")
+		print('Current residual =', r)
+		return r
+
 #---Fixed Point---
-def SimpleIterIP(k_max, A, c, tau, N, eps = 1e-13):# OUTDATED/rework to call in GMRES_m similar manner.
-	I = np.identity(N)
-	A = csr_matrix(A)
+def SimpleIter(LinOp, tau, x_0, b, k_max, eps = 1e-13):
+	N = x_0.shape[0] #N = n^2
+	s = x_0
+	iterdata = iterations_data()
 	st = time.time()
-	S = I
-	residuals = []
-	iterations = []
 	for k in range(k_max):
-		S_prev = S
-		ATSA_factor = A.T@S@A
-		S = (I-S + c*ATSA_factor - c*np.diag(np.diag(ATSA_factor)))*tau+S
-		residual = np.linalg.norm(S-S_prev, ord = 'fro') #fro? l2?
-		residuals.append(residual)
-		iterations.append(k)
-		print(f"Iteration: {k}")
-		print(f"Residual: {residual}")
-		#print(S)
-		if (residual < eps):
+		s_prev = s
+		s = (b-LinOp(s))*tau+s
+		r_norm2 = np.linalg.norm(s-s_prev, ord = 2)
+		iterdata(r_norm2)
+		if (r_norm2  < eps):
 			break
 	et = time.time()
 	elapsed = et - st
 	print(f"Elapsed: {elapsed} s")
-	#plt.figure()
-	#plt.grid()
-	res_graph = plt.plot(iterations, residuals)
-	plt.yscale('log')
-	plt.xlabel(r'$Iterations$', fontsize = 12) 
-	plt.ylabel(r'$Local\quadresiduals$', fontsize = 12)
-	
-	return S
+	solutiondata = [iterdata.iterations, iterdata.residuals, elapsed]
+	return s, solutiondata
 #---
+
+
+#---GMRES(m)---
 
 #---MGS debug---
 
@@ -55,7 +59,7 @@ def SeeNNZ(V):
 	return
 
 #---
-#---GMRES(m)---
+
 def LSq(beta, H):
 	m = H.shape[1]
 	e1 = np.zeros((m+1,1))
@@ -154,26 +158,19 @@ def GMRES_m(LinOp, m_Krylov, x_0, b, k_max, eps = 1e-13):
 
 #---GMRES SciPy ver---
 
-def my_callback(x):
-	print('Current residual =', x)
 
 def GMRES_scipy(LinOp, m_Krylov, x_0, b, k_max, eps = 1e-13):
 	N = x_0.shape[0] #N=n^2
-	iterations = []
-	residuals = []
+	iterdata = iterations_data()
 	G = scsp.linalg.LinearOperator((N,N), matvec = LinOp)
 	st = time.time()
-	s, data = scsp.linalg.gmres(G, b, x0=x_0, atol=eps, restart=m_Krylov, maxiter=None, M=None, callback=my_callback, callback_type=None)
+	s, data = scsp.linalg.gmres(G, b, x0=x_0, atol=eps, restart=m_Krylov, maxiter=None, M=None, callback=iterdata, callback_type=None)
 	et = time.time()
 	elapsed = et - st
 	print("Elapsed:", elapsed)
 	print("Solution:", s)
-	#res_graph = plt.plot(iterations, residuals, color = 'green')
-	#plt.yscale('log')
-	#plt.xlabel(r'$Iterations$', fontsize = 12) 
-	#plt.ylabel(r'$Local\quadresiduals$', fontsize = 12)
-	
-	return s
+	solutiondata = [iterdata.iterations, iterdata.residuals, elapsed]
+	return s, solutiondata
 #---
 
 #---MinRes---

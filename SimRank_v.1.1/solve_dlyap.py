@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import datetime as dt
 from matplotlib.ticker import FixedLocator, FixedFormatter
 from memory_profiler import profile
-import dlyap
+import solvers as slv
 
 class G_operator:
 	def __init__(self, A, c):
@@ -23,7 +23,13 @@ class G_operator:
 		G = G.reshape((self.n**2,1), order = 'F')
 		return G
 
-def Solve(acc, m_Krylov, k_iter_max, taskname, A, c, solvers): #solvers = list of flags: ['SimpleIter, GMRES, MinRes'] (in any order)
+def plot(solvername, taskname, solutiondata, acc):
+	res_graph = plt.plot(solutiondata[0], solutiondata[1])
+	plt.yscale('log')
+	plt.xlabel(r'$Iterations$', fontsize = 12) 
+	plt.ylabel(r'$Local\quadresiduals$', fontsize = 12)
+
+def Solve(acc, m_Krylov, tau, k_iter_max, taskname, A, c, solvers): #solvers = list of flags: ['SimpleIter, GMRES, MinRes'] (in any order)
 	n = A.shape[0]
 	if (A.shape[0]!=A.shape[1]):
 		print("Non-square matrix passed in argument. Stopped.")
@@ -36,35 +42,49 @@ def Solve(acc, m_Krylov, k_iter_max, taskname, A, c, solvers): #solvers = list o
 	A_csr = csr_matrix(A) #if A is already CSR -> changes nothing.
 	G = G_operator(A_csr, c) #Initialize operator
 	S = {} #init dict of solutions
-	
+	notfound = True
+	plt.figure()
+	plt.grid()
 	for solver in solvers:
 		if (solver == "SimpleIter"):
-			S_si = 0 #placeholder
+			notfound = False
+			s_si, solutiondata = slv.SimpleIter(G, tau, I_vec, I_vec, k_iter_max, acc)
+			S_si = s_si.reshape((n,n), order = 'F')
+			plot(solver, taskname, solutiondata, acc)
 			S["S_si"] = S_si
-		elif (solver == "GMRES"):
+		if (solver == "GMRES"):
+			notfound = False
 			print(f"Starting GMRES with {k_iter_max} iterations limit and {m_Krylov} max Krylov subspace dimensionality ..")
-			S_gmres = dlyap.GMRES_m(G, m_Krylov, I_vec, I_vec, k_iter_max, acc).reshape((n,n), order = 'F')
+			s_gmres = slv.GMRES_m(G, m_Krylov, I_vec, I_vec, k_iter_max, acc).reshape((n,n), order = 'F')
+			S_gmres = s_gmres.reshape((n,n), order = 'F')
+			plot(solver, taskname, solutiondata, acc)
 			S["S_gmres"] = S_gmres
-		elif (solver == "GMRES_scipy"):
+		if (solver == "GMRES_scipy"):
+			notfound = False
 			print(f"Starting GMRES from SciPy with {k_iter_max} iterations limit and {m_Krylov} max Krylov subspace dimensionality ..")
-			S_gmres_scipy = dlyap.GMRES_scipy(G, m_Krylov, I_vec, I_vec, k_iter_max, acc).reshape((n,n), order = 'F')
+			s_gmres_scipy, solutiondata = slv.GMRES_scipy(G, m_Krylov, I_vec, I_vec, k_iter_max, acc)
+			S_gmres_scipy = s_gmres_scipy.reshape((n,n), order = 'F')
+			plot(solver, taskname, solutiondata, acc)
 			S["S_gmres_scipy"] = S_gmres_scipy
-		elif (solver == "MinRes"):
+		if (solver == "MinRes"):
+			notfound = False
 			print(f"Starting MinRes with {k_iter_max} iterations limit  ...")
 			S_minres = 0#placeholder
+			plot(solver, taskname, solutiondata, acc)
 			S["S_minres"] = S_minres
-
-		else:
+		if notfound:
 			print("Solver not found.")
 			return 1
+	plt.savefig("results/_"+taskname+"_eps_"+str(acc)+"_"+str(dt.datetime.now())+".png")
 	for key in S:
-		plt.savefig(taskname+key+"_eps_"+str(acc)+"_"+str(dt.datetime.now())+".png")
+		print(key)
 		plt.figure()
 		graph = plt.imshow(np.log(S[key]-I+1e-15))
 		cbar = plt.colorbar()
 		cbar.set_label("ln(S[i,j])")
 		plt.title(taskname)
 		plt.title("Матрица S", fontweight = "bold")
+	plt.show()
 	return S
 
 
