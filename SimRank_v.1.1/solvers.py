@@ -74,7 +74,7 @@ def Arnoldi(V_list, h_list, m_start, m_Krylov, LinOp, eps_zero = 1e-5):
 		v_j = V_list[j]
 		w_j = colvecto1dim(LinOp(v_j))
 		Av_j_norm2 = np.linalg.norm(w_j, ord = 2)
-		for i in range(j):
+		for i in range(j+1):
 			v_i = V_list[i]
 			h_list[i][j] = v_i@w_j  
 			w_j = w_j - h_list[i][j]*v_i
@@ -92,25 +92,20 @@ def GMRES_m(LinOp, m_Krylov, x_0, b, k_max, eps = 1e-13):
 	N = x_0.shape[0] #N = n^2
 	restarts = []
 	residuals = []
+	iterdata = iterations_data()
 	st = time.time()
 	x = x_0
+	break_outer = False
 	for k in range(k_max):
+		if (break_outer):
+			break
 		st_restart = time.time()
 		r = b - LinOp(x)
-		residual = np.linalg.norm(r, ord = 2)
-		
-		#Writing iteration information
-		print("Residual:", residual) #residual with last restart solution.
-		print("Relative residual:", residual/np.linalg.norm(LinOp(x), ord = 2))
-		print("Restart:", k)
-		restarts.append(k)
-		residuals.append(residual)
-		#
-		
-		if (residual < eps):
+		r_norm2 = np.linalg.norm(r, ord = 2)
+		iterdata(r_norm2)
+		if (r_norm2 < eps):
 			break
-		
-		beta = np.linalg.norm(r, ord = 2)
+		beta = r_norm2
 		V_list = [np.zeros(N)] #Stores columns of V matrix
 		V_list[0] = colvecto1dim(r)/beta
 		H_list = [np.zeros(m_Krylov)] #Stores rows of Hessenberg matrix
@@ -122,38 +117,28 @@ def GMRES_m(LinOp, m_Krylov, x_0, b, k_max, eps = 1e-13):
 			m = Arnoldi(V_list, H_list, (m-1), m,  LinOp)
 			V = (np.array(V_list[:m])).T #Slicing V_list[:m] because v_{m+1} is not needed for projection step.
 			###
-			MGSError(V)
-			SeeNNZ(V)
+			#MGSError(V)
+			#SeeNNZ(V)
 			###
 			H = (np.array(H_list)).T[:m].T #Slicing because everything right to m'th column is placeholding zeros.
 			y = LSq(beta, H)
 			x = x_0 + V@y
 			
-			# *break condition*
+			if (r_norm2 < eps):
+				break_outer = True
+				break
+			r_norm2 = np.linalg.norm(b-LinOp(x), ord = 2)
+			iterdata(r_norm2)
 			et_iter = time.time()
-			print(f"m = {m}; Residual = :", np.linalg.norm(b-LinOp(x), ord = 2), f"; Iteration time: {et_iter-st_iter} s")
+			print(f"m = {m}; Residual = :", r_norm2, f"; Iteration time: {et_iter-st_iter} s")
 		x_0 = x
 		et_restart = time.time()
 		print("Restart time:", et_iter - st_iter)
-
 	et = time.time()
 	elapsed = et - st
-	
-	#Writing solution information
 	print(f"GMRES(m) time: {elapsed} s")
-	print("Iterations", restarts)
-	print("Residuals", residuals)
-	#
-	#plt.figure()
-	#plt.grid()
-	
-	#Plotting
-	res_graph = plt.plot(restarts, residuals, color = 'green')
-	plt.yscale('log')
-	plt.xlabel(r'$Iterations$', fontsize = 12) 
-	plt.ylabel(r'$Local\quadresiduals$', fontsize = 12)
-	#
-	return x
+	solutiondata = [iterdata.iterations, iterdata.residuals, elapsed]
+	return x, solutiondata
 #---
 
 #---GMRES SciPy ver---

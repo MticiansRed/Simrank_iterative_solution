@@ -55,7 +55,7 @@ def Solve(acc, m_Krylov, tau, k_iter_max, taskname, A, c, solvers): #solvers = l
 		if (solver == "GMRES"):
 			notfound = False
 			print(f"Starting GMRES with {k_iter_max} iterations limit and {m_Krylov} max Krylov subspace dimensionality ..")
-			s_gmres = slv.GMRES_m(G, m_Krylov, I_vec, I_vec, k_iter_max, acc).reshape((n,n), order = 'F')
+			s_gmres, solutiondata = slv.GMRES_m(G, m_Krylov, I_vec, I_vec, k_iter_max, acc)
 			S_gmres = s_gmres.reshape((n,n), order = 'F')
 			plot(solver, taskname, solutiondata, acc)
 			S["S_gmres"] = S_gmres
