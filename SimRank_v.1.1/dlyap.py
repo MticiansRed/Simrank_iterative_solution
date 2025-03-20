@@ -1,10 +1,12 @@
 import numpy as np
 import matplotlib.pyplot as plt 
 from scipy.sparse import csr_matrix
+import scipy.sparse as scsp
 import sys
 import time
 from memory_profiler import profile
 
+#---Fixed Point---
 def SimpleIterIP(k_max, A, c, tau, N, eps = 1e-13):# OUTDATED/rework to call in GMRES_m similar manner.
 	I = np.identity(N)
 	A = csr_matrix(A)
@@ -35,8 +37,25 @@ def SimpleIterIP(k_max, A, c, tau, N, eps = 1e-13):# OUTDATED/rework to call in 
 	plt.ylabel(r'$Local\quadresiduals$', fontsize = 12)
 	
 	return S
+#---
 
-#---main version---
+#---MGS debug---
+
+def MGSError(V):
+	M = V.T@V
+	n = M.shape[0]
+	print(f"|| I - V.T@V ||_F = {np.linalg.norm((np.identity(n)-M), ord = 'fro')}")
+	return
+def SeeNNZ(V):
+	M = V.T@V
+	for i in range(M.shape[0]):
+		for j in range(M.shape[1]):
+			if (M[i,j]!=0):
+				print(f"Nonzero({i},{j}) = {M[i,j]}")
+	return
+
+#---
+#---GMRES(m)---
 def LSq(beta, H):
 	m = H.shape[1]
 	e1 = np.zeros((m+1,1))
@@ -45,40 +64,42 @@ def LSq(beta, H):
 	y = np.linalg.inv(H.T@H)@H.T@b
 	return y
 
-def Arnoldi(V_list, h, m, LinOp):
-	for j in range(m):
+def Arnoldi(V_list, h_list, m_start, m_Krylov, LinOp, eps_zero = 1e-5):
+	for j in range(m_start, m_Krylov):
 		print(f"Building Arnoldi: V[:,{j}]", end = '\r')
 		v_j = V_list[j]
 		w_j = colvecto1dim(LinOp(v_j))
+		Av_j_norm2 = np.linalg.norm(w_j, ord = 2)
 		for i in range(j):
 			v_i = V_list[i]
-			h[i,j] = v_i@w_j 
-			w_j = w_j - h[i,j]*v_i
-		h[j+1,j] = np.linalg.norm(w_j, ord = 2)
-		if (h[j+1,j] == 0):
+			h_list[i][j] = v_i@w_j  
+			w_j = w_j - h_list[i][j]*v_i
+		w_j_norm2 = np.linalg.norm(w_j, ord = 2)
+		h_list[j+1][j] = w_j_norm2
+		if (w_j_norm2 <= eps_zero*Av_j_norm2):
 			return j
-		V_list[j+1] = (w_j/h[j+1,j])
-	return m
+		V_list[j+1] = (w_j/w_j_norm2)
+	return m_Krylov
 
 def colvecto1dim(u):
 	return u.reshape(u.shape[0], order = 'F')
 
-def GMRES_m(LinOp, m, x_0, k_max, eps = 1e-13):
+def GMRES_m(LinOp, m_Krylov, x_0, b, k_max, eps = 1e-13):
 	N = x_0.shape[0] #N = n^2
-	iterations = []
+	restarts = []
 	residuals = []
 	st = time.time()
-	s = x_0
+	x = x_0
 	for k in range(k_max):
-		st_iter = time.time()
-		r = x_0 - LinOp(s)
-
+		st_restart = time.time()
+		r = b - LinOp(x)
+		residual = np.linalg.norm(r, ord = 2)
+		
 		#Writing iteration information
-		iterations.append(k)
-		print("Iteration:", k)
-		residual = np.linalg.norm(x_0 - LinOp(s), ord = 2)
-		print("Residual:", residual)
-		print("Relative residual:", residual/np.linalg.norm(LinOp(s), ord = 2))
+		print("Residual:", residual) #residual with last restart solution.
+		print("Relative residual:", residual/np.linalg.norm(LinOp(x), ord = 2))
+		print("Restart:", k)
+		restarts.append(k)
 		residuals.append(residual)
 		#
 		
@@ -86,45 +107,76 @@ def GMRES_m(LinOp, m, x_0, k_max, eps = 1e-13):
 			break
 		
 		beta = np.linalg.norm(r, ord = 2)
-		V_list = [np.array([0.0]*N)]*(m+1)
+		V_list = [np.zeros(N)] #Stores columns of V matrix
 		V_list[0] = colvecto1dim(r)/beta
-		H = np.zeros((m+1, m))
-		st = time.time() ###
-		m = Arnoldi(V_list, H, m, LinOp)
-		V = (np.array(V_list[:m])).T #V_list[:m] because v_{m+1} is not needed for projection step.
-		elapsed = time.time() - st ###
-		print(f"Arnoldi time: {elapsed}")
-		st = time.time() ###
-		y = LSq(beta, H)
-		elapsed = time.time() - st ###
-		print(f"LSq time: {elapsed}")
-		st = time.time() ###
-		s = s + V@y
-		elapsed = time.time() - st ###
-		print(f"Projection step time: {elapsed}")
-		et_iter = time.time()
-		print("Iteration time:", et_iter - st_iter)
+		H_list = [np.zeros(m_Krylov)] #Stores rows of Hessenberg matrix
+		
+		for m in range(1,m_Krylov):
+			V_list.append(np.zeros(N)) #Reserving space for vector (column of V) v_{j+1}
+			H_list.append(np.zeros(m_Krylov)) #Reserving space for row of H h_{j+1}
+			st_iter = time.time()
+			m = Arnoldi(V_list, H_list, (m-1), m,  LinOp)
+			V = (np.array(V_list[:m])).T #Slicing V_list[:m] because v_{m+1} is not needed for projection step.
+			###
+			MGSError(V)
+			SeeNNZ(V)
+			###
+			H = (np.array(H_list)).T[:m].T #Slicing because everything right to m'th column is placeholding zeros.
+			y = LSq(beta, H)
+			x = x_0 + V@y
+			
+			# *break condition*
+			et_iter = time.time()
+			print(f"m = {m}; Residual = :", np.linalg.norm(b-LinOp(x), ord = 2), f"; Iteration time: {et_iter-st_iter} s")
+		x_0 = x
+		et_restart = time.time()
+		print("Restart time:", et_iter - st_iter)
 
 	et = time.time()
 	elapsed = et - st
 	
 	#Writing solution information
-	print(f"Elapsed: {elapsed} s")
-	print("Iterations", iterations)
+	print(f"GMRES(m) time: {elapsed} s")
+	print("Iterations", restarts)
 	print("Residuals", residuals)
 	#
 	#plt.figure()
 	#plt.grid()
 	
 	#Plotting
-	res_graph = plt.plot(iterations, residuals, color = 'green')
+	res_graph = plt.plot(restarts, residuals, color = 'green')
 	plt.yscale('log')
 	plt.xlabel(r'$Iterations$', fontsize = 12) 
 	plt.ylabel(r'$Local\quadresiduals$', fontsize = 12)
 	#
-	S = s.reshape((N,N), order = 'F')
-	return S
+	return x
+#---
 
+#---GMRES SciPy ver---
+
+def my_callback(x):
+	print('Current residual =', x)
+
+def GMRES_scipy(LinOp, m_Krylov, x_0, b, k_max, eps = 1e-13):
+	N = x_0.shape[0] #N=n^2
+	iterations = []
+	residuals = []
+	G = scsp.linalg.LinearOperator((N,N), matvec = LinOp)
+	st = time.time()
+	s, data = scsp.linalg.gmres(G, b, x0=x_0, atol=eps, restart=m_Krylov, maxiter=None, M=None, callback=my_callback, callback_type=None)
+	et = time.time()
+	elapsed = et - st
+	print("Elapsed:", elapsed)
+	print("Solution:", s)
+	#res_graph = plt.plot(iterations, residuals, color = 'green')
+	#plt.yscale('log')
+	#plt.xlabel(r'$Iterations$', fontsize = 12) 
+	#plt.ylabel(r'$Local\quadresiduals$', fontsize = 12)
+	
+	return s
+#---
+
+#---MinRes---
 def MinRes(k_max, A, c, N, eps = 1e-13): # OUTDATED/rework to call in GMRES_m similar manner.
 	I = np.identity(N)
 	I_vec = I.reshape((N**2, 1), order = 'F')
@@ -166,3 +218,4 @@ def MinRes(k_max, A, c, N, eps = 1e-13): # OUTDATED/rework to call in GMRES_m si
 	plt.ylabel(r'$Local\quadresiduals$', fontsize = 12)
 	S = s.reshape((N,N), order = 'F')
 	return S
+#---
