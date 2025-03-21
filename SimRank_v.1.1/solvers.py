@@ -13,10 +13,10 @@ class iterations_data:
 		self.residuals = []
 		self.k_iter = 0
 	def __call__(self, r):
+		print(f"Iteration: {self.k_iter}")
 		self.k_iter+=1
 		self.iterations.append(self.k_iter)
 		self.residuals.append(r)
-		print(f"Iteration: {self.k_iter}")
 		print('Current residual =', r)
 		return r
 
@@ -30,8 +30,9 @@ def SimpleIter(LinOp, tau, x_0, b, k_max, eps = 1e-13):
 		s_prev = s
 		s = (b-LinOp(s))*tau+s
 		r_norm2 = np.linalg.norm(s-s_prev, ord = 2)
-		iterdata(r_norm2)
-		if (r_norm2  < eps):
+		relres = r_norm2/np.linalg.norm(b, ord = 2)
+		iterdata(relres)
+		if (relres  < eps):
 			break
 	et = time.time()
 	elapsed = et - st
@@ -43,23 +44,6 @@ def SimpleIter(LinOp, tau, x_0, b, k_max, eps = 1e-13):
 
 #---GMRES(m)---
 
-#---MGS debug---
-
-def MGSError(V):
-	M = V.T@V
-	n = M.shape[0]
-	print(f"|| I - V.T@V ||_F = {np.linalg.norm((np.identity(n)-M), ord = 'fro')}")
-	return
-def SeeNNZ(V):
-	M = V.T@V
-	for i in range(M.shape[0]):
-		for j in range(M.shape[1]):
-			if (M[i,j]!=0):
-				print(f"Nonzero({i},{j}) = {M[i,j]}")
-	return
-
-#---
-
 def LSq(beta, H):
 	m = H.shape[1]
 	e1 = np.zeros((m+1,1))
@@ -70,7 +54,7 @@ def LSq(beta, H):
 
 def Arnoldi(V_list, h_list, m_start, m_Krylov, LinOp, eps_zero = 1e-5):
 	for j in range(m_start, m_Krylov):
-		print(f"Building Arnoldi: V[:,{j}]", end = '\r')
+		#print(f"Building Arnoldi: V[:,{j}]")
 		v_j = V_list[j]
 		w_j = colvecto1dim(LinOp(v_j))
 		Av_j_norm2 = np.linalg.norm(w_j, ord = 2)
@@ -89,10 +73,15 @@ def colvecto1dim(u):
 	return u.reshape(u.shape[0], order = 'F')
 
 def GMRES_m(LinOp, m_Krylov, x_0, b, k_max, eps = 1e-13):
+	m_Krylov +=1
 	N = x_0.shape[0] #N = n^2
 	restarts = []
 	residuals = []
+	r = b - LinOp(x_0)
+	r_norm2 = np.linalg.norm(r, ord = 2)
+	relres = r_norm2/np.linalg.norm(b, ord = 2)
 	iterdata = iterations_data()
+	iterdata(relres)
 	st = time.time()
 	x = x_0
 	break_outer = False
@@ -102,38 +91,31 @@ def GMRES_m(LinOp, m_Krylov, x_0, b, k_max, eps = 1e-13):
 		st_restart = time.time()
 		r = b - LinOp(x)
 		r_norm2 = np.linalg.norm(r, ord = 2)
-		iterdata(r_norm2)
-		if (r_norm2 < eps):
-			break
 		beta = r_norm2
 		V_list = [np.zeros(N)] #Stores columns of V matrix
 		V_list[0] = colvecto1dim(r)/beta
 		H_list = [np.zeros(m_Krylov)] #Stores rows of Hessenberg matrix
 		
 		for m in range(1,m_Krylov):
+			st_iter = time.time()
 			V_list.append(np.zeros(N)) #Reserving space for vector (column of V) v_{j+1}
 			H_list.append(np.zeros(m_Krylov)) #Reserving space for row of H h_{j+1}
-			st_iter = time.time()
 			m = Arnoldi(V_list, H_list, (m-1), m,  LinOp)
 			V = (np.array(V_list[:m])).T #Slicing V_list[:m] because v_{m+1} is not needed for projection step.
-			###
-			#MGSError(V)
-			#SeeNNZ(V)
-			###
 			H = (np.array(H_list)).T[:m].T #Slicing because everything right to m'th column is placeholding zeros.
 			y = LSq(beta, H)
 			x = x_0 + V@y
-			
-			if (r_norm2 < eps):
+			r_norm2_inner = np.linalg.norm(b-LinOp(x), ord = 2)
+			relres_inner = r_norm2_inner/np.linalg.norm(b, ord = 2)
+			iterdata(relres_inner) #rel residual
+			if (relres_inner < eps):
 				break_outer = True
 				break
-			r_norm2 = np.linalg.norm(b-LinOp(x), ord = 2)
-			iterdata(r_norm2)
 			et_iter = time.time()
-			print(f"m = {m}; Residual = :", r_norm2, f"; Iteration time: {et_iter-st_iter} s")
+			print(f"m = {m+1}; Residual = :", r_norm2_inner, f"; Iteration time: {et_iter-st_iter} s")
 		x_0 = x
 		et_restart = time.time()
-		print("Restart time:", et_iter - st_iter)
+		print("Restart time:", et_restart - st_restart)
 	et = time.time()
 	elapsed = et - st
 	print(f"GMRES(m) time: {elapsed} s")
@@ -147,6 +129,8 @@ def GMRES_m(LinOp, m_Krylov, x_0, b, k_max, eps = 1e-13):
 def GMRES_scipy(LinOp, m_Krylov, x_0, b, k_max, eps = 1e-13):
 	N = x_0.shape[0] #N=n^2
 	iterdata = iterations_data()
+	r = b - LinOp(x_0) #initial residual
+	iterdata(np.linalg.norm(r, ord = 2)/np.linalg.norm(b, ord = 2))
 	G = scsp.linalg.LinearOperator((N,N), matvec = LinOp)
 	st = time.time()
 	s, data = scsp.linalg.gmres(G, b, x0=x_0, atol=eps, restart=m_Krylov, maxiter=None, M=None, callback=iterdata, callback_type=None)

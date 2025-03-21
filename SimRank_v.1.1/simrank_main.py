@@ -52,5 +52,5 @@ def main_process(args):
 	sdlyap.Solve(acc, m_Krylov, tau, k_iter_max, taskname, A, c, solvers)
 
 if __name__=="__main__":
-	args = [1e-5,15, 1, 1000000000, "Fb", 0.8,  ["SimpleIter", "GMRES_scipy"]] #default args
+	args = [1e-5,15, 1, 1000000000, "Fb", 0.8,  ["GMRES", "GMRES_scipy", "SimpleIter"]] #default args
 	main_process(args)
