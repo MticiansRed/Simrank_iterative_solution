@@ -52,21 +52,22 @@ def LSq(beta, H):
 	y = np.linalg.inv(H.T@H)@H.T@b
 	return y
 
-def Arnoldi(V_list, h_list, m_start, m_Krylov, LinOp, eps_zero = 1e-5):
+def Arnoldi(V, H, m_start, m_Krylov, LinOp, eps_zero = 1e-5):
 	for j in range(m_start, m_Krylov):
 		#print(f"Building Arnoldi: V[:,{j}]")
-		v_j = V_list[j]
+		v_j = V[:,j]
 		w_j = colvecto1dim(LinOp(v_j))
 		Av_j_norm2 = np.linalg.norm(w_j, ord = 2)
 		for i in range(j+1):
-			v_i = V_list[i]
-			h_list[i][j] = v_i@w_j  
-			w_j = w_j - h_list[i][j]*v_i
+			v_i = V[:,i]
+			h_ij = v_i.T@w_j  
+			H[i,j] = h_ij
+			w_j = w_j - h_ij*v_i
 		w_j_norm2 = np.linalg.norm(w_j, ord = 2)
-		h_list[j+1][j] = w_j_norm2
+		H[j+1,j] = w_j_norm2
 		if (w_j_norm2 <= eps_zero*Av_j_norm2):
 			return j
-		V_list[j+1] = (w_j/w_j_norm2)
+		V[:,j+1] = (w_j/w_j_norm2)
 	return m_Krylov
 
 def colvecto1dim(u):
@@ -89,19 +90,17 @@ def GMRES_m(LinOp, m_Krylov, x_0, b, k_max, eps = 1e-13):
 		r = b - LinOp(x)
 		r_norm2 = np.linalg.norm(r, ord = 2)
 		beta = r_norm2
-		V_list = [np.zeros(N)] #Stores columns of V matrix
-		V_list[0] = colvecto1dim(r)/beta
-		H_list = [np.zeros(m_Krylov)] #Stores rows of Hessenberg matrix
+		V = np.empty((N,m_Krylov+1))
+		V[:,0] = colvecto1dim(r)/beta
+		H = np.empty((m_Krylov+1,m_Krylov))
 		
 		for m in range(1,m_Krylov+1):
 			st_iter = time.time()
-			V_list.append(np.zeros(N)) #Reserving space for vector (column of V) v_{j+1}
-			H_list.append(np.zeros(m_Krylov)) #Reserving space for row of H h_{j+1}
-			m_res = Arnoldi(V_list, H_list, (m-1), m,  LinOp)
-			V = (np.array(V_list[:m_res])).T #Slicing V_list[:m] because v_{m+1} is not needed for projection step.
-			H = (np.array(H_list))[:,:m_res] #Slicing because everything right to m'th column is placeholding zeros.
-			y = LSq(beta, H)
-			x = x_0 + V@y
+			m_res = Arnoldi(V, H, (m-1), m,  LinOp)
+			V_m = V[:,:m_res]
+			H_m = H[:m_res+1,:m_res]
+			y = LSq(beta, H_m)
+			x = x_0 + V_m@y
 			r_norm2_inner = np.linalg.norm(b-LinOp(x), ord = 2)
 			relres_inner = r_norm2_inner/np.linalg.norm(b, ord = 2)
 			iterdata(relres_inner) #rel residual
