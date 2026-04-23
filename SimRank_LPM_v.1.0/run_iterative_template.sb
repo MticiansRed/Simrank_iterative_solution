@@ -1,0 +1,17 @@
+#!/bin/bash
+#SBATCH·--time=72:00:00
+#SBATCH·--ntasks=1
+#SBATCH·--nodes=1
+#SBATCH·--ntasks-per-node=1
+#SBATCH·--cpus-per-task=1
+#SBATCH·--output=../cout/run_iterative_solver_%j.out
+#SBATCH·--error=../cout/run_iterative_solver_%j.err
+
+export·OMP_PROC_BIND="spread"
+export·OMP_PLACES="cores"
+
+export·OMP_NUM_THREADS=36
+
+
+
+python3 -u collect_iterative_solutions.py -tn eumail -sl GMRES -c 0.8 -m 15 -it 500
